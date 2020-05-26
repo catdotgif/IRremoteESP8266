@@ -257,3 +257,52 @@ TEST(TestDecodeSanyoLC7461, FailToDecodeNonSanyoLC7461Example) {
       irrecv.decodeSanyoLC7461(&irsend.capture, kStartOffset, kSanyoLC7461Bits,
                                false));
 }
+
+// Decode a 'real' example.
+// Ref: https://github.com/crankyoldgit/IRremoteESP8266/issues/1146
+TEST(TestDecodeSanyoLC7461, DecodeRealExample) {
+  IRsendTest irsend(0);
+  IRrecv irrecv(0);
+  irsend.begin();
+
+  irsend.reset();
+  // https://github.com/crankyoldgit/IRremoteESP8266/issues/1146#issue-624427828
+  const uint16_t raw[91] = {
+      8782, 4391,
+      552, 552, 552, 552, 552, 552, 552, 1656, 552, 552, 552, 552, 552, 1656,
+      552, 1656, 552, 552, 552, 1656, 552, 552, 552, 552, 552, 552, 552, 1656,
+      552, 1656, 552, 1656, 552, 552, 552, 1656, 552, 1656, 552, 552, 552, 552,
+      552, 1656, 552, 552, 552, 1656, 552, 1656, 552, 1656, 552, 552, 552, 552,
+      552, 1656, 552, 552, 552, 552, 552, 1656, 552, 1656, 552, 552, 552, 1656,
+      552, 1656, 552, 552, 552, 1656, 552, 1656, 552, 552, 552, 552, 552, 1656,
+      552, 23087,
+      8782, 4391, 552};
+  irsend.sendRaw(raw, 91, 38);
+  irsend.makeDecodeResult();
+
+  ASSERT_TRUE(irrecv.decode(&irsend.capture));
+  EXPECT_EQ(decode_type_t::SANYO_LC7461, irsend.capture.decode_type);
+  EXPECT_EQ(kSanyoLC7461Bits, irsend.capture.bits);
+  EXPECT_EQ(0x4D1D9726D9, irsend.capture.value);
+
+  // See if we can self decode etc and reproduce the same message.
+  irsend.reset();
+  irsend.sendSanyoLC7461(0x4D1D9726D9, kSanyoLC7461Bits, kSingleRepeat);
+  irsend.makeDecodeResult();
+
+  ASSERT_TRUE(irrecv.decode(&irsend.capture));
+  EXPECT_EQ(decode_type_t::SANYO_LC7461, irsend.capture.decode_type);
+  EXPECT_EQ(kSanyoLC7461Bits, irsend.capture.bits);
+  EXPECT_EQ(0x4D1D9726D9, irsend.capture.value);
+  EXPECT_EQ(
+      "f38000d33"
+      "m8960s4480"
+      "m560s560m560s560m560s560m560s1680m560s560m560s560m560s1680m560s1680"
+      "m560s560m560s1680m560s560m560s560m560s560m560s1680m560s1680m560s1680"
+      "m560s560m560s1680m560s1680m560s560m560s560m560s1680m560s560m560s1680"
+      "m560s1680m560s1680m560s560m560s560m560s1680m560s560m560s560m560s1680"
+      "m560s1680m560s560m560s1680m560s1680m560s560m560s1680m560s1680m560s560"
+      "m560s560m560s1680m560s23520"
+      "m8960s2240m560s96320",
+      irsend.outputStr());
+}
