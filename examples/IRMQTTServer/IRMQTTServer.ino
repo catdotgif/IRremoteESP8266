@@ -1,11 +1,11 @@
-/*
- * Send & receive arbitrary IR codes via a web server or MQTT.
- * Copyright David Conran 2016, 2017, 2018, 2019
+
+/*//with custom modifications
+ *Rev1: Added DHT22 read code
  *
- * Copyright:
- *   Code for this has been borrowed from lots of other OpenSource projects &
- *   resources. I'm *NOT* claiming complete Copyright ownership of all the code.
- *   Likewise, feel free to borrow from this as much as you want.
+ *
+ *
+ *
+ *
  *
  * NOTE: An IR LED circuit SHOULD be connected to the ESP if
  *       you want to send IR messages. e.g. GPIO4 (D2)
@@ -357,6 +357,7 @@
 #include <IRtimer.h>
 #include <IRutils.h>
 #include <IRac.h>
+#include <DHT.h>
 #if MQTT_ENABLE
 #include <PubSubClient.h>
 // --------------------------------------------------------------------
@@ -380,15 +381,25 @@ using irutils::msToString;
   ADC_MODE(ADC_VCC);
 #endif  // REPORT_VCC
 
+/*****************************************************
+ * DHT Sensor Configuration
+ * **************************************************/
+#define temperature_topic "sensor/temperature"  //Topic température
+#define humidity_topic "sensor/humidity"        //Topic humidité
+#define DHTPIN D4    // Pin sur lequel est branché le DHT
+#define DHTTYPE DHT22         // DHT 22  (AM2302)
+DHT dht(DHTPIN, DHTTYPE);
+
+
 // Globals
 #if defined(ESP8266)
-ESP8266WebServer server(kHttpPort);
+  ESP8266WebServer server(kHttpPort);
 #endif  // ESP8266
 #if defined(ESP32)
-WebServer server(kHttpPort);
+  WebServer server(kHttpPort);
 #endif  // ESP32
 #if MDNS_ENABLE
-MDNSResponder mdns;
+  MDNSResponder mdns;
 #endif  // MDNS_ENABLE
 WiFiClient espClient;
 WiFiManager wifiManager;
@@ -407,14 +418,6 @@ int8_t offset;  // The calculated period offset for this chip and library.
 IRsend *IrSendTable[kNrOfIrTxGpios];
 int8_t txGpioTable[kNrOfIrTxGpios] = {kDefaultIrLed};
 String lastClimateSource;
-#if IR_RX
-IRrecv *irrecv = NULL;
-decode_results capture;  // Somewhere to store inbound IR messages.
-int8_t rx_gpio = kDefaultIrRx;
-String lastIrReceived = "None";
-uint32_t lastIrReceivedTime = 0;
-uint32_t irRecvCounter = 0;
-#endif  // IR_RX
 
 // Climate stuff
 IRac *climate[kNrOfIrTxGpios];
@@ -439,7 +442,7 @@ uint32_t mqttSentCounter = 0;
 uint32_t mqttRecvCounter = 0;
 bool wasConnected = true;
 
-char MqttServer[kHostnameLength + 1] = "10.0.0.4";
+char MqttServer[kHostnameLength + 1] = "192.168.1.99";
 char MqttPort[kPortLength + 1] = "1883";
 char MqttUsername[kUsernameLength + 1] = "";
 char MqttPassword[kPasswordLength + 1] = "";
@@ -508,6 +511,11 @@ void debug(const char *str) {
 #endif  // DEBUG
 }
 #pragma GCC diagnostic pop
+
+/*****************************************
+ * JSON methods
+ * **************************************/
+
 
 // callback notifying us of the need to save the wifi config
 void saveWifiConfigCallback(void) {
@@ -2080,28 +2088,29 @@ void init_vars(void) {
 #endif  // MQTT_ENABLE
 }
 
-void setup(void) {
-#if DEBUG
-  if (!isSerialGpioUsedByIr()) {
-#if defined(ESP8266)
-    // Use SERIAL_TX_ONLY so that the RX pin can be freed up for GPIO/IR use.
-    Serial.begin(BAUD_RATE, SERIAL_8N1, SERIAL_TX_ONLY);
-#else  // ESP8266
-    Serial.begin(BAUD_RATE, SERIAL_8N1);
-#endif  // ESP8266
-    while (!Serial)  // Wait for the serial connection to be establised.
-      delay(50);
-    Serial.println();
-    debug("IRMQTTServer " _MY_VERSION_ " has booted.");
-  }
-#endif  // DEBUG
+void setup() {
+  dht.begin();
+  #if DEBUG
+      if (!isSerialGpioUsedByIr()) {
+    #if defined(ESP8266)
+        // Use SERIAL_TX_ONLY so that the RX pin can be freed up for GPIO/IR use.
+        Serial.begin(BAUD_RATE, SERIAL_8N1, SERIAL_TX_ONLY);
+    #else  // ESP8266
+        Serial.begin(BAUD_RATE, SERIAL_8N1);
+    #endif  // ESP8266
+        while (!Serial)  // Wait for the serial connection to be establised.
+          delay(50);
+        Serial.println();
+        debug("IRMQTTServer " _MY_VERSION_ " has booted.");
+      }
+  #endif  // DEBUG
 
   setup_wifi();
 
-#if DEBUG
-  // After the config has been loaded, check again if we are using a Serial GPIO
-  if (isSerialGpioUsedByIr()) Serial.end();
-#endif  // DEBUG
+  #if DEBUG
+    // After the config has been loaded, check again if we are using a Serial GPIO
+    if (isSerialGpioUsedByIr()) Serial.end();
+  #endif  // DEBUG
 
   channel_re.reserve(kNrOfIrTxGpios * 3);
   // Initialise all the IR transmitters.
@@ -2126,34 +2135,24 @@ void setup(void) {
     channel_re.remove(channel_re.length() - 1, 1);  // Remove the last char.
     channel_re += F(")?");
   }
-#if IR_RX
-  if (rx_gpio != kGpioUnused)
-    irrecv = new IRrecv(rx_gpio, kCaptureBufferSize, kCaptureTimeout, true);
-  if (irrecv != NULL) {
-#if DECODE_HASH
-    // Ignore messages with less than minimum on or off pulses.
-    irrecv->setUnknownThreshold(kMinUnknownSize);
-#endif  // DECODE_HASH
-    irrecv->enableIRIn(IR_RX_PULLUP);  // Start the receiver
-  }
-#endif  // IR_RX
+
   // Wait a bit for things to settle.
   delay(500);
 
   lastReconnectAttempt = 0;
 
 #if MDNS_ENABLE
-#if defined(ESP8266)
-  if (mdns.begin(Hostname, WiFi.localIP())) {
-#else  // ESP8266
-  if (mdns.begin(Hostname)) {
-#endif  // ESP8266
-    debug("MDNS responder started");
-  }
+  #if defined(ESP8266)
+    if (mdns.begin(Hostname, WiFi.localIP())) {
+  #else  // ESP8266
+    if (mdns.begin(Hostname)) {
+  #endif  // ESP8266
+      debug("MDNS responder started");
+    }
 #endif  // MDNS_ENABLE
 
-  // Setup the root web page.
-  server.on(kUrlRoot, handleRoot);
+// Setup the root web page.
+server.on(kUrlRoot, handleRoot);
 #if EXAMPLES_ENABLE
   // Setup the examples web page.
   server.on(kUrlExamples, handleExamples);
@@ -2594,8 +2593,9 @@ void sendMQTTDiscovery(const char *topic) {
 #endif  // MQTT_DISCOVERY_ENABLE
 #endif  // MQTT_ENABLE
 
-void loop(void) {
+void loop() {
   server.handleClient();  // Handle any web activity
+  float tempReading = dht.readTemperature();
 
 #if MQTT_ENABLE
   uint32_t now = millis();
@@ -2657,50 +2657,11 @@ void loop(void) {
     doBroadcast(&lastBroadcast, kBroadcastPeriodMs, climate, false, false);
   }
 #endif  // MQTT_ENABLE
-#if IR_RX
-  // Check if an IR code has been received via the IR RX module.
-#if REPORT_UNKNOWNS
-  if (irrecv != NULL && irrecv->decode(&capture)) {
-#else  // REPORT_UNKNOWNS
-  if (irrecv != NULL && irrecv->decode(&capture) &&
-      capture.decode_type != UNKNOWN) {
-#endif  // REPORT_UNKNOWNS
-    lastIrReceivedTime = millis();
-    lastIrReceived = String(capture.decode_type) + kCommandDelimiter[0] +
-        resultToHexidecimal(&capture);
-#if REPORT_RAW_UNKNOWNS
-    if (capture.decode_type == UNKNOWN) {
-      lastIrReceived += ";";
-      for (uint16_t i = 1; i < capture.rawlen; i++) {
-        uint32_t usecs;
-        for (usecs = capture.rawbuf[i] * kRawTick; usecs > UINT16_MAX;
-             usecs -= UINT16_MAX) {
-          lastIrReceived += uint64ToString(UINT16_MAX);
-          lastIrReceived += ",0,";
-        }
-        lastIrReceived += uint64ToString(usecs, 10);
-        if (i < capture.rawlen - 1)
-          lastIrReceived += ",";
-      }
-    }
-#endif  // REPORT_RAW_UNKNOWNS
-    // If it isn't an AC code, add the bits.
-    if (!hasACState(capture.decode_type))
-      lastIrReceived += kCommandDelimiter[0] + String(capture.bits);
-#if MQTT_ENABLE
-    mqtt_client.publish(MqttRecv.c_str(), lastIrReceived.c_str());
-    mqttSentCounter++;
-    debug("Incoming IR message sent to MQTT:");
-    debug(lastIrReceived.c_str());
-#endif  // MQTT_ENABLE
-    irRecvCounter++;
-#if USE_DECODED_AC_SETTINGS
-    if (decodeCommonAc(&capture)) lastClimateSource = F("IR");
-#endif  // USE_DECODED_AC_SETTINGS
-  }
-#endif  // IR_RX
   delay(100);
-}
+}   //end loop()
+
+
+
 
 // Arduino framework doesn't support strtoull(), so make our own one.
 uint64_t getUInt64fromHex(char const *str) {
@@ -2895,7 +2856,6 @@ void sendJsonState(const stdAc::state_t state, const String topic,
   json[KEY_SLEEP] = state.sleep;
 
   String payload = "";
-  payload.reserve(200);
   serializeJson(json, payload);
   sendString(topic, payload, retain);
 }
