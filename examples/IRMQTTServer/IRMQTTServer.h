@@ -24,7 +24,7 @@
 
 #ifndef EXAMPLES_ENABLE
 // Whether or not examples are included. `false` saves ~2.5K of program space.
-#define EXAMPLES_ENABLE true
+#define EXAMPLES_ENABLE false
 #endif  // EXAMPLES_ENABLE
 
 // ---------------------- Board Related Settings -------------------------------
@@ -52,7 +52,7 @@ const int8_t kDefaultIrRx = 14;  // <=- CHANGE_ME (optional)
 
 // Enable/disable receiving/decoding IR messages entirely.
 // Note: IR_RX costs about 40k+ of program memory.
-#define IR_RX true
+#define IR_RX false
 
 // Should we use PULLUP on the IR Rx gpio?
 #define IR_RX_PULLUP false
@@ -123,7 +123,7 @@ const uint32_t kMqttReconnectTime = 5000;  // Delay(ms) between reconnect tries.
 // If set to `false` you may miss requested state changes while the ESP was
 // down. If set to `true`, it will resend the previous desired state sent to the
 // A/C. Depending on your circumstances, you may need to change this.
-#define MQTT_CLIMATE_IR_SEND_ON_RESTART false
+#define MQTT_CLIMATE_IR_SEND_ON_RESTART true
 #define MQTTbroadcastInterval 10 * 60  // Seconds between rebroadcasts.
 
 #define QOS 1  // MQTT broker should queue up any unreceived messages for us
@@ -245,7 +245,7 @@ const uint16_t kJsonAcStateMaxSize = 1024;  // Bytes
 // See `isSerialGpioUsedByIr()`.
 // Note: Debug costs ~6k of program space.
 #ifndef DEBUG
-#define DEBUG false  // Change to 'true' for serial debug output.
+#define DEBUG true  // Change to 'true' for serial debug output.
 #endif  // DEBUG
 
 // ----------------- End of User Configuration Section -------------------------

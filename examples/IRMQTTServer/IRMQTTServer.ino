@@ -1,6 +1,6 @@
 
 /*//with custom modifications
- *Rev1: Added DHT22 read code
+ * Rev1: Added DHT22 read code
  *
  *
  *
@@ -386,9 +386,10 @@ using irutils::msToString;
  * **************************************************/
 #define temperature_topic "sensor/temperature"  //Topic température
 #define humidity_topic "sensor/humidity"        //Topic humidité
-#define DHTPIN D4    // Pin sur lequel est branché le DHT
+#define DHTPIN D3    // Pin sur lequel est branché le DHT
 #define DHTTYPE DHT22         // DHT 22  (AM2302)
 DHT dht(DHTPIN, DHTTYPE);
+TimerMs LEDTimer = TimerMs(); //Turn on the LED to acknowledge a transmission
 
 
 // Globals
@@ -2090,6 +2091,11 @@ void init_vars(void) {
 
 void setup() {
   dht.begin();
+  pinMode(D0, OUTPUT);  
+  digitalWrite(D0, HIGH);
+  pinMode(D4, OUTPUT);      //the two internal LED pins onboard the NODEMCU
+  digitalWrite(D4, HIGH);   //Note that the pins are inverting, HIGH = Off
+  
   #if DEBUG
       if (!isSerialGpioUsedByIr()) {
     #if defined(ESP8266)
@@ -2293,7 +2299,7 @@ void mqttLog(const char* str) {
 }
 
 bool reconnect(void) {
-  // Loop a few times or until we're reconnected
+  // Try a few times or until we're reconnected
   uint16_t tries = 1;
   while (!mqtt_client.connected() && tries <= 3) {
     int connected = false;
@@ -2595,7 +2601,7 @@ void sendMQTTDiscovery(const char *topic) {
 
 void loop() {
   server.handleClient();  // Handle any web activity
-  float tempReading = dht.readTemperature();
+  float tempReading = dht.readTemperature(); //read from the DHT22 sensor
 
 #if MQTT_ENABLE
   uint32_t now = millis();
@@ -2638,16 +2644,25 @@ void loop() {
     // MQTT loop
     lastConnectedTime = now;
     mqtt_client.loop();
+    
+    //send temperature data
+    mqtt_client.publish(temperature_topic,String(tempReading).c_str(), true);
+    
     if (lockMqttBroadcast && statListenTime.elapsed() > kStatListenPeriodMs) {
       for (uint16_t i = 0; i < kNrOfIrTxGpios; i++) {
         String stat_topic = genStatTopic(i);
         unsubscribing(stat_topic + '+');
         // Did something change?
         if (climate[i] != NULL && climate[i]->hasStateChanged()) {
+          digitalWrite(D0, LOW);
+          digitalWrite(D4, LOW);
           sendClimate(stat_topic, true, false, false,
                       MQTT_CLIMATE_IR_SEND_ON_RESTART, climate[i]);
           lastClimateSource = F("MQTT (via retain)");
           mqttLog("The state was recovered from MQTT broker.");
+          delay(1000);
+          digitalWrite(D0, HIGH);
+          digitalWrite(D4, HIGH);
         }
       }
       mqttLog("Finished listening for previous state.");
