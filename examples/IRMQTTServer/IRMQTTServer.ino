@@ -385,12 +385,13 @@ using irutils::msToString;
  * DHT Sensor Configuration
  * **************************************************/
 #define temperature_topic "sensor/temperature"  //Topic température
-#define humidity_topic "sensor/humidity"        //Topic humidité
+//#define humidity_topic "sensor/humidity"        //Topic humidité
 #define DHTPIN D3    // Pin sur lequel est branché le DHT
 #define DHTTYPE DHT22         // DHT 22  (AM2302)
 DHT dht(DHTPIN, DHTTYPE);
-TimerMs LEDTimer = TimerMs(); //Turn on the LED to acknowledge a transmission
-
+float newTempReading = 0; 
+float oldTempReading = 0;
+//TimerMs LEDTimer = TimerMs(); //Turn on the LED to acknowledge a transmission
 
 // Globals
 #if defined(ESP8266)
@@ -2091,10 +2092,8 @@ void init_vars(void) {
 
 void setup() {
   dht.begin();
-  pinMode(D0, OUTPUT);  
-  digitalWrite(D0, HIGH);
-  pinMode(D4, OUTPUT);      //the two internal LED pins onboard the NODEMCU
-  digitalWrite(D4, HIGH);   //Note that the pins are inverting, HIGH = Off
+  pinMode(LED_BUILTIN, OUTPUT);  
+  digitalWrite(LED_BUILTIN, HIGH);
   
   #if DEBUG
       if (!isSerialGpioUsedByIr()) {
@@ -2601,10 +2600,21 @@ void sendMQTTDiscovery(const char *topic) {
 
 void loop() {
   server.handleClient();  // Handle any web activity
-  float tempReading = dht.readTemperature(); //read from the DHT22 sensor
-
+//  debug( (char *) LEDTimer.elapsed());
 #if MQTT_ENABLE
+  //gather and send temperature data
+  newTempReading = dht.readTemperature(); //read from the DHT22 sensor
+      mqtt_client.publish(temperature_topic,String(newTempReading).c_str(), true);
+    debug("Sent temperature reading ");
+  if (newTempReading != oldTempReading) {
+
+    oldTempReading = newTempReading;
+  }
   uint32_t now = millis();
+  /*if (now - LEDTimer.elapsed() > 5000) {
+    digitalWrite(LED_BUILTIN, HIGH);
+    debug("turned off internal LED");
+    }*/
   // MQTT client connection management
   if (!mqtt_client.connected()) {
     if (wasConnected) {
@@ -2644,25 +2654,21 @@ void loop() {
     // MQTT loop
     lastConnectedTime = now;
     mqtt_client.loop();
-    
-    //send temperature data
-    mqtt_client.publish(temperature_topic,String(tempReading).c_str(), true);
-    
     if (lockMqttBroadcast && statListenTime.elapsed() > kStatListenPeriodMs) {
+
       for (uint16_t i = 0; i < kNrOfIrTxGpios; i++) {
         String stat_topic = genStatTopic(i);
         unsubscribing(stat_topic + '+');
         // Did something change?
         if (climate[i] != NULL && climate[i]->hasStateChanged()) {
-          digitalWrite(D0, LOW);
-          digitalWrite(D4, LOW);
+          digitalWrite(LED_BUILTIN, LOW);  //turn on the onboard LEDs
+          debug("turned on internal LED");
+          //LEDTimer.reset();       //start counting
+        
           sendClimate(stat_topic, true, false, false,
                       MQTT_CLIMATE_IR_SEND_ON_RESTART, climate[i]);
           lastClimateSource = F("MQTT (via retain)");
           mqttLog("The state was recovered from MQTT broker.");
-          delay(1000);
-          digitalWrite(D0, HIGH);
-          digitalWrite(D4, HIGH);
         }
       }
       mqttLog("Finished listening for previous state.");
